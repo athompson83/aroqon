@@ -94,11 +94,11 @@ export async function replyAction(input: unknown): Promise<Result<string>> {
 export async function requestSignInAction(input: unknown): Promise<Result<null>> {
   const parsed = z.object({ email: z.email() }).safeParse(input);
   if (!parsed.success) return { ok: false, error: "Enter an email address" };
-  const e = env();
   // Same answer whether or not the address is the owner's, so the form does
   // not confirm who owns HQ.
-  if (parsed.data.email.toLowerCase() === e.HQ_OWNER_EMAIL.toLowerCase()) {
-    try {
+  try {
+    const e = env();
+    if (parsed.data.email.toLowerCase() === e.HQ_OWNER_EMAIL.toLowerCase()) {
       const token = await signToken(
         {
           purpose: "signin",
@@ -111,9 +111,9 @@ export async function requestSignInAction(input: unknown): Promise<Result<null>>
       const url = new URL("/auth/callback", e.HQ_BASE_URL);
       url.searchParams.set("token", token);
       await sendSignInLink(e.HQ_OWNER_EMAIL, url.toString());
-    } catch (err) {
-      return fail(err);
     }
+  } catch (err) {
+    return fail(err);
   }
   return { ok: true, data: null };
 }
