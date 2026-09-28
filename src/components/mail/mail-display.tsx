@@ -9,6 +9,7 @@ import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { mailBodyAction, replyAction, triageAction } from "@/lib/actions";
+import { linkify, withLinkTargets } from "@/lib/linkify";
 import { CATEGORIES, projectFor, type MailItem } from "@/lib/mail-organize";
 import type { MailBody } from "@/lib/resend";
 
@@ -22,16 +23,20 @@ export function MailDisplay({ mail }: MailDisplayProps) {
   const [notice, setNotice] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
+  // Keyed on the id, not the object: HQ refreshes itself every 20 seconds and
+  // hands down a fresh object each time, which must not re-download the body.
+  const mailId = mail?.id;
+  const direction = mail?.direction;
   useEffect(() => {
-    if (!mail) return;
+    if (!mailId || !direction) return;
     let live = true;
-    mailBodyAction({ id: mail.id, direction: mail.direction }).then((r) => {
-      if (live) setBody({ id: mail.id, result: r.ok ? r.data : r.error });
+    mailBodyAction({ id: mailId, direction }).then((r) => {
+      if (live) setBody({ id: mailId, result: r.ok ? r.data : r.error });
     });
     return () => {
       live = false;
     };
-  }, [mail]);
+  }, [mailId, direction]);
 
   if (!mail) {
     return <div className="p-8 text-center text-muted-foreground">No message selected</div>;
@@ -138,13 +143,31 @@ export function MailDisplay({ mail }: MailDisplayProps) {
           ) : typeof loaded === "string" ? (
             <p className="text-bad">Could not load this email: {loaded}</p>
           ) : loaded.text ? (
-            <div className="whitespace-pre-wrap">{loaded.text}</div>
+            <div className="whitespace-pre-wrap break-words">
+              {linkify(loaded.text).map((seg, i) =>
+                seg.kind === "link" ? (
+                  <a
+                    key={i}
+                    href={seg.href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-primary underline underline-offset-2 hover:opacity-80"
+                  >
+                    {seg.text}
+                  </a>
+                ) : (
+                  seg.text
+                ),
+              )}
+            </div>
           ) : loaded.html ? (
             // No scripts, no same-origin: the email cannot reach HQ's cookies.
+            // Popups are allowed so its links open in a new tab.
             <iframe
               title="Email body"
-              sandbox=""
-              srcDoc={loaded.html}
+              sandbox="allow-popups allow-popups-to-escape-sandbox"
+              referrerPolicy="no-referrer"
+              srcDoc={withLinkTargets(loaded.html)}
               className="h-full min-h-[400px] w-full rounded-md border bg-white"
             />
           ) : (

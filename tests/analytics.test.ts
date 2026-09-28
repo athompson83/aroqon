@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { formatValue, portfolioTotal, seriesFrom, taskStats } from "@/lib/analytics";
+import {
+  formatValue,
+  portfolioTotal,
+  projectProgress,
+  seriesFrom,
+  taskStats,
+} from "@/lib/analytics";
 import type { Metric, Task } from "@/lib/hq-types";
 
 const metric = (over: Partial<Metric>): Metric => ({
@@ -67,5 +73,28 @@ describe("formatValue", () => {
     expect(formatValue(1234, "usd")).toBe("$1,234");
     expect(formatValue(0.256, "pct")).toBe("25.6%");
     expect(formatValue(42, null)).toBe("42");
+  });
+});
+
+describe("projectProgress", () => {
+  it("counts each project's tasks by status and ignores dropped ones", () => {
+    const progress = projectProgress([
+      task({ project_slug: "rise", status: "open" }),
+      task({ project_slug: "rise", status: "doing" }),
+      task({ project_slug: "rise", status: "done" }),
+      task({ project_slug: "rise", status: "dropped" }),
+      task({ project_slug: "captivate", status: "blocked" }),
+      task({ project_slug: null, status: "done" }),
+    ]);
+    expect(progress.get("rise")).toEqual({
+      open: 1,
+      doing: 1,
+      blocked: 0,
+      done: 1,
+      total: 3,
+      completion: 1 / 3,
+    });
+    expect(progress.get("captivate")?.blocked).toBe(1);
+    expect(progress.size).toBe(2);
   });
 });

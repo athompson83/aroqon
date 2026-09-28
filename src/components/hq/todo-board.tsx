@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useOptimistic, useState, useTransition } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,6 +26,11 @@ export function TodoBoard({
   projects: { slug: string; name: string }[];
 }) {
   const [pending, startTransition] = useTransition();
+  // Status, priority and owner changes show at once; the server's answer
+  // replaces them when it arrives, or the change rolls back if it fails.
+  const [shown, applyPatch] = useOptimistic(tasks, (state, patch: TaskPatch) =>
+    state.map((t) => (t.id === patch.id ? withPatch(t, patch) : t)),
+  );
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState({ title: "", project_slug: "", priority: "p2", due_on: "" });
   const [openId, setOpenId] = useState<string | null>(null);
@@ -34,6 +39,7 @@ export function TodoBoard({
 
   function save(input: Record<string, unknown>, after?: () => void) {
     startTransition(async () => {
+      if (typeof input.id === "string") applyPatch(input as TaskPatch);
       const r = await saveTaskAction(input);
       if (r.ok) {
         setError(null);
@@ -102,130 +108,143 @@ export function TodoBoard({
       </form>
       {error && <p className="text-sm text-bad">{error}</p>}
 
-      {GROUPS.map((g) => {
-        const rows = tasks.filter(g.match);
-        if (!rows.length) return null;
-        return (
-          <section key={g.title}>
-            <h2 className="mb-2 text-sm font-semibold">
-              {g.title} <span className="font-normal text-muted-foreground">{rows.length}</span>
-            </h2>
-            <ul className="divide-y rounded-xl border bg-card">
-              {rows.map((t) => {
-                const done = t.status === "done" || t.status === "dropped";
-                return (
-                  <li key={t.id} className="px-3 py-2.5">
-                    <div className="flex items-start gap-3">
-                      <input
-                        type="checkbox"
-                        className="mt-1 h-4 w-4 accent-[var(--primary)]"
-                        checked={done}
-                        disabled={pending}
-                        onChange={() => save({ id: t.id, status: done ? "open" : "done" })}
-                        aria-label={done ? "Reopen" : "Mark done"}
-                      />
-                      <button
-                        type="button"
-                        className="flex-1 text-left text-sm"
-                        onClick={() => setOpenId(openId === t.id ? null : t.id)}
-                      >
-                        <span className={cn(done && "text-muted-foreground line-through")}>
-                          {t.title}
-                        </span>
-                        <span className="ml-2 font-mono text-xs uppercase text-muted-foreground">
-                          {t.priority}
-                        </span>
-                        {t.project_slug && (
-                          <span className="ml-2 text-xs text-muted-foreground">
-                            {names.get(t.project_slug) ?? t.project_slug}
+      <div className="space-y-6 xl:grid xl:grid-cols-3 xl:items-start xl:gap-6 xl:space-y-0 min-[1800px]:grid-cols-5">
+        {GROUPS.map((g) => {
+          const rows = shown.filter(g.match);
+          return (
+            <section key={g.title} className={cn(!rows.length && "max-xl:hidden")}>
+              <h2 className="mb-2 text-sm font-semibold">
+                {g.title} <span className="font-normal text-muted-foreground">{rows.length}</span>
+              </h2>
+              {!rows.length && (
+                <p className="rounded-xl border border-dashed p-4 text-sm text-muted-foreground">
+                  Nothing here.
+                </p>
+              )}
+              <ul className={cn("divide-y rounded-xl border bg-card", !rows.length && "hidden")}>
+                {rows.map((t) => {
+                  const done = t.status === "done" || t.status === "dropped";
+                  return (
+                    <li key={t.id} className="px-3 py-2.5">
+                      <div className="flex items-start gap-3">
+                        <input
+                          type="checkbox"
+                          className="mt-1 h-4 w-4 accent-[var(--primary)]"
+                          checked={done}
+                          onChange={() => save({ id: t.id, status: done ? "open" : "done" })}
+                          aria-label={done ? "Reopen" : "Mark done"}
+                        />
+                        <button
+                          type="button"
+                          className="min-w-0 flex-1 text-left text-sm"
+                          onClick={() => setOpenId(openId === t.id ? null : t.id)}
+                        >
+                          <span className={cn(done && "text-muted-foreground line-through")}>
+                            {t.title}
                           </span>
-                        )}
-                        {t.due_on && (
-                          <span
-                            className={cn(
-                              "ml-2 text-xs",
-                              !done && t.due_on < today ? "text-bad" : "text-muted-foreground",
-                            )}
-                          >
-                            due {t.due_on}
+                          <span className="ml-2 font-mono text-xs uppercase text-muted-foreground">
+                            {t.priority}
                           </span>
-                        )}
-                      </button>
-                      <select
-                        className={cn(selectClass, "h-8")}
-                        value={t.status}
-                        disabled={pending}
-                        onChange={(e) => save({ id: t.id, status: e.target.value })}
-                        aria-label="Status"
-                      >
-                        {["open", "doing", "blocked", "done", "dropped"].map((s) => (
-                          <option key={s}>{s}</option>
-                        ))}
-                      </select>
-                    </div>
-                    {openId === t.id && (
-                      <div className="ml-7 mt-2 space-y-2 text-sm">
-                        {t.detail && (
-                          <p className="whitespace-pre-wrap text-muted-foreground">{t.detail}</p>
-                        )}
-                        <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                          <span>Owner: {t.owner}</span>
-                          <span>· Added by {t.created_by}</span>
-                          {t.source && <span>· From {t.source}</span>}
-                          {t.source_url && /^https:\/\//.test(t.source_url) && (
-                            <a
-                              className="underline"
-                              href={t.source_url}
-                              target="_blank"
-                              rel="noreferrer"
-                            >
-                              · Evidence
-                            </a>
+                          {t.project_slug && (
+                            <span className="ml-2 text-xs text-muted-foreground">
+                              {names.get(t.project_slug) ?? t.project_slug}
+                            </span>
                           )}
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          <select
-                            className={cn(selectClass, "h-8")}
-                            value={t.priority}
-                            disabled={pending}
-                            onChange={(e) => save({ id: t.id, priority: e.target.value })}
-                            aria-label="Priority"
-                          >
-                            {["p0", "p1", "p2", "p3"].map((p) => (
-                              <option key={p}>{p}</option>
-                            ))}
-                          </select>
-                          <select
-                            className={cn(selectClass, "h-8")}
-                            value={t.owner}
-                            disabled={pending}
-                            onChange={(e) => save({ id: t.id, owner: e.target.value })}
-                            aria-label="Owner"
-                          >
-                            <option value="owner">Me</option>
-                            <option value="cofounder">Co-Founder</option>
-                            <option value="agent">An agent</option>
-                          </select>
-                          <Input
-                            type="date"
-                            className="h-8 w-40"
-                            defaultValue={t.due_on ?? ""}
-                            onBlur={(e) =>
-                              e.target.value !== (t.due_on ?? "") &&
-                              save({ id: t.id, due_on: e.target.value || null })
-                            }
-                            aria-label="Due date"
-                          />
-                        </div>
+                          {t.due_on && (
+                            <span
+                              className={cn(
+                                "ml-2 text-xs",
+                                !done && t.due_on < today ? "text-bad" : "text-muted-foreground",
+                              )}
+                            >
+                              due {t.due_on}
+                            </span>
+                          )}
+                        </button>
+                        <select
+                          className={cn(selectClass, "h-8")}
+                          value={t.status}
+                          onChange={(e) => save({ id: t.id, status: e.target.value })}
+                          aria-label="Status"
+                        >
+                          {["open", "doing", "blocked", "done", "dropped"].map((s) => (
+                            <option key={s}>{s}</option>
+                          ))}
+                        </select>
                       </div>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
-          </section>
-        );
-      })}
+                      {openId === t.id && (
+                        <div className="ml-7 mt-2 space-y-2 text-sm">
+                          {t.detail && (
+                            <p className="whitespace-pre-wrap text-muted-foreground">{t.detail}</p>
+                          )}
+                          <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                            <span>Owner: {t.owner}</span>
+                            <span>· Added by {t.created_by}</span>
+                            {t.source && <span>· From {t.source}</span>}
+                            {t.source_url && /^https:\/\//.test(t.source_url) && (
+                              <a
+                                className="underline"
+                                href={t.source_url}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                · Evidence
+                              </a>
+                            )}
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            <select
+                              className={cn(selectClass, "h-8")}
+                              value={t.priority}
+                              onChange={(e) => save({ id: t.id, priority: e.target.value })}
+                              aria-label="Priority"
+                            >
+                              {["p0", "p1", "p2", "p3"].map((p) => (
+                                <option key={p}>{p}</option>
+                              ))}
+                            </select>
+                            <select
+                              className={cn(selectClass, "h-8")}
+                              value={t.owner}
+                              onChange={(e) => save({ id: t.id, owner: e.target.value })}
+                              aria-label="Owner"
+                            >
+                              <option value="owner">Me</option>
+                              <option value="cofounder">Co-Founder</option>
+                              <option value="agent">An agent</option>
+                            </select>
+                            <Input
+                              type="date"
+                              className="h-8 w-40"
+                              defaultValue={t.due_on ?? ""}
+                              onBlur={(e) =>
+                                e.target.value !== (t.due_on ?? "") &&
+                                save({ id: t.id, due_on: e.target.value || null })
+                              }
+                              aria-label="Due date"
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+          );
+        })}
+      </div>
     </div>
   );
+}
+
+type TaskPatch = Partial<Pick<Task, "status" | "priority" | "owner" | "due_on">> & { id: string };
+
+function withPatch(task: Task, patch: TaskPatch): Task {
+  const next = { ...task, ...patch };
+  if (patch.status) {
+    next.completed_at =
+      patch.status === "done" ? (task.completed_at ?? new Date().toISOString()) : null;
+  }
+  return next;
 }

@@ -29,8 +29,10 @@ Next.js app in this repository.
   `hq.login_nonces`. It sets a 30-day httpOnly session cookie. Only
   `HQ_OWNER_EMAIL` can sign in. The form gives the same answer for every
   address, so it does not reveal whose HQ it is.
-- Email HTML is rendered in an iframe with an empty `sandbox`: no scripts,
-  and no access to HQ's origin.
+- Email HTML is rendered in a sandboxed iframe that allows popups and
+  nothing else. Its links open in a new tab, but it can't run scripts or
+  reach HQ's origin. In plain-text email only `http(s)` and `mailto` links
+  are clickable (`src/lib/linkify.ts`).
 - The Co-Founder writes with the Supabase `execute_sql` tool, which
   connects as the database owner. That path needs no gateway key.
 
@@ -68,6 +70,15 @@ before you use them.
 | `email_bounces_7d`     | count | Resend                                                                  |
 | `alerts_7d`            | count | Resend (received mail in the Alerts category)                           |
 | `leads_7d`             | count | Supabase (e.g. `rise_leads`)                                            |
+
+## Live updates
+
+The HQ pages re-render every 20 seconds while the tab is visible, and again
+when you return to it. A task the Co-Founder or an agent moves shows up
+without a reload. On the To-do board your own status, priority and owner
+changes show immediately, before the server confirms them. When a task
+linked to an email (`hq.email_triage.task_id`) is marked done, that email is
+marked handled (trigger `tasks_done_handles_email`).
 
 ## Email organisation
 

@@ -90,3 +90,38 @@ export function formatValue(value: number, unit: string | null): string {
   if (unit === "pct") return `${(value * 100).toFixed(1)}%`;
   return value.toLocaleString("en-US");
 }
+
+export interface ProjectProgress {
+  open: number;
+  doing: number;
+  blocked: number;
+  done: number;
+  total: number;
+  // Share of this week's tasks that are finished, 0–1. Null when there is nothing to measure.
+  completion: number | null;
+}
+
+// Progress per project from the tasks the dashboard holds (everything live plus
+// what finished in the last week), so it moves the moment a task changes state.
+export function projectProgress(tasks: Task[]): Map<string, ProjectProgress> {
+  const out = new Map<string, ProjectProgress>();
+  for (const t of tasks) {
+    if (!t.project_slug || t.status === "dropped") continue;
+    const p = out.get(t.project_slug) ?? {
+      open: 0,
+      doing: 0,
+      blocked: 0,
+      done: 0,
+      total: 0,
+      completion: null,
+    };
+    if (t.status === "open") p.open++;
+    else if (t.status === "doing") p.doing++;
+    else if (t.status === "blocked") p.blocked++;
+    else if (t.status === "done") p.done++;
+    p.total++;
+    p.completion = p.done / p.total;
+    out.set(t.project_slug, p);
+  }
+  return out;
+}

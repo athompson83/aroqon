@@ -3,7 +3,7 @@ import { formatDistanceToNow } from "date-fns";
 
 import { Markdown } from "@/components/hq/markdown";
 import { Dot, Panel, Sparkline, Stat } from "@/components/hq/ui";
-import { agentStats, formatValue, seriesFrom, taskStats } from "@/lib/analytics";
+import { agentStats, formatValue, projectProgress, seriesFrom, taskStats } from "@/lib/analytics";
 import { loadDashboard } from "@/lib/hq";
 import { mailStats, organize } from "@/lib/mail-organize";
 import { fetchMail } from "@/lib/resend";
@@ -26,27 +26,11 @@ export default async function Overview() {
     .filter((t) => t.status !== "done" && t.status !== "dropped")
     .slice(0, 8);
   const projectName = new Map(data.projects.map((p) => [p.slug, p.name]));
+  const progress = projectProgress(data.tasks);
 
   return (
-    <div className="mx-auto max-w-7xl space-y-6 p-4 sm:p-6">
-      <Panel
-        title={brief ? brief.headline : "No brief yet"}
-        action={
-          brief
-            ? `${brief.kind} brief · ${formatDistanceToNow(new Date(brief.created_at), { addSuffix: true })}`
-            : undefined
-        }
-      >
-        {brief ? (
-          <Markdown source={brief.body_md} />
-        ) : (
-          <p className="text-sm text-muted-foreground">
-            The Co-Founder posts a brief here after its first scheduled run.
-          </p>
-        )}
-      </Panel>
-
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
+    <div className="mx-auto w-full max-w-[2400px] space-y-6 p-4 sm:p-6 2xl:px-10">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
         <Stat
           label="Your open to-dos"
           value={String(tasks.mine)}
@@ -82,186 +66,246 @@ export default async function Overview() {
         />
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-5">
-        <Panel
-          title="Next up"
-          action={
-            <Link href="/todo" className="hover:text-foreground">
-              All to-dos →
-            </Link>
-          }
-          className="lg:col-span-3"
-        >
-          {nextUp.length ? (
-            <ul className="divide-y">
-              {nextUp.map((t) => (
-                <li key={t.id} className="flex items-baseline gap-3 py-2 text-sm">
-                  <span className="w-7 shrink-0 font-mono text-xs uppercase text-muted-foreground">
-                    {t.priority}
-                  </span>
-                  <span className="flex-1">
-                    {t.title}
-                    {t.project_slug && (
-                      <span className="ml-2 text-xs text-muted-foreground">
-                        {projectName.get(t.project_slug) ?? t.project_slug}
+      <div className="grid items-start gap-6 xl:grid-cols-12">
+        <div className="space-y-6 xl:col-span-8 min-[1920px]:contents">
+          <div className="space-y-6 min-[1920px]:col-span-5">
+            <Panel
+              title={brief ? brief.headline : "No brief yet"}
+              action={
+                brief
+                  ? `${brief.kind} brief · ${formatDistanceToNow(new Date(brief.created_at), { addSuffix: true })}`
+                  : undefined
+              }
+            >
+              {brief ? (
+                <Markdown source={brief.body_md} />
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  The Co-Founder posts a brief here after its first scheduled run.
+                </p>
+              )}
+            </Panel>
+
+            <Panel
+              title="Next up"
+              action={
+                <Link href="/todo" className="hover:text-foreground">
+                  All to-dos →
+                </Link>
+              }
+            >
+              {nextUp.length ? (
+                <ul className="max-h-[60vh] divide-y overflow-y-auto pr-1">
+                  {nextUp.map((t) => (
+                    <li key={t.id} className="flex items-baseline gap-3 py-2 text-sm">
+                      <span className="w-7 shrink-0 font-mono text-xs uppercase text-muted-foreground">
+                        {t.priority}
                       </span>
+                      <span className="flex-1">
+                        {t.title}
+                        {t.project_slug && (
+                          <span className="ml-2 text-xs text-muted-foreground">
+                            {projectName.get(t.project_slug) ?? t.project_slug}
+                          </span>
+                        )}
+                      </span>
+                      <span className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <StatusChip status={t.status} />
+                        {t.owner !== "owner" && <span>{t.owner}</span>}
+                        {t.due_on && <span>due {t.due_on}</span>}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-sm text-muted-foreground">Nothing open.</p>
+              )}
+            </Panel>
+          </div>
+          <div className="space-y-6 min-[1920px]:col-span-4">
+            <Panel
+              title="Analytics"
+              action={series.length ? "Recorded by the Co-Founder from each source" : undefined}
+            >
+              {series.length ? (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="text-left text-xs text-muted-foreground">
+                      <tr>
+                        <th className="py-2 pr-4 font-normal">Metric</th>
+                        <th className="py-2 pr-4 font-normal">Project</th>
+                        <th className="py-2 pr-4 text-right font-normal">Latest</th>
+                        <th className="py-2 pr-4 text-right font-normal">Change</th>
+                        <th className="py-2 pr-4 font-normal">Trend</th>
+                        <th className="py-2 font-normal">Source · as of</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {series.map((s) => {
+                        const delta = s.previous === null ? null : s.latest - s.previous;
+                        return (
+                          <tr key={`${s.metric}-${s.project}`}>
+                            <td className="py-2 pr-4">{s.metric.replace(/_/g, " ")}</td>
+                            <td className="py-2 pr-4 text-muted-foreground">
+                              {s.project ? (projectName.get(s.project) ?? s.project) : "Portfolio"}
+                            </td>
+                            <td className="py-2 pr-4 text-right tabular-nums">
+                              {formatValue(s.latest, s.unit)}
+                            </td>
+                            <td className="py-2 pr-4 text-right tabular-nums text-muted-foreground">
+                              {delta === null
+                                ? "—"
+                                : `${delta > 0 ? "+" : ""}${formatValue(delta, s.unit)}`}
+                            </td>
+                            <td className="py-2 pr-4">
+                              <Sparkline points={s.points} />
+                            </td>
+                            <td className="py-2 text-xs text-muted-foreground">
+                              {s.source} ·{" "}
+                              {formatDistanceToNow(new Date(s.asOf), { addSuffix: true })}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">No metrics recorded yet.</p>
+              )}
+            </Panel>
+          </div>
+        </div>
+        <div className="space-y-6 xl:col-span-4 min-[1920px]:col-span-3">
+          <Panel
+            title="Mail by category"
+            action={
+              <Link href="/mail" className="hover:text-foreground">
+                Open mail →
+              </Link>
+            }
+          >
+            {mail.error && <p className="mb-2 text-xs text-bad">Resend: {mail.error}</p>}
+            <ul className="space-y-2 text-sm">
+              {Object.entries(m.byCategory)
+                .sort((a, b) => b[1] - a[1])
+                .map(([cat, n]) => (
+                  <li key={cat} className="flex items-center gap-3">
+                    <span className="w-24">{cat}</span>
+                    <span className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
+                      <span
+                        className="block h-full rounded-full bg-primary"
+                        style={{ width: `${(n / Math.max(1, m.received)) * 100}%` }}
+                      />
+                    </span>
+                    <span className="w-8 text-right tabular-nums text-muted-foreground">{n}</span>
+                  </li>
+                ))}
+            </ul>
+            <p className="mt-3 text-xs text-muted-foreground">
+              Last {m.received} received and {m.sent} sent through Resend.
+            </p>
+          </Panel>
+          <Panel title="Projects">
+            <ul className="divide-y">
+              {data.projects.map((p) => (
+                <li key={p.slug} className="flex gap-3 py-2.5 text-sm">
+                  <Dot status={p.health} />
+                  <div className="flex-1">
+                    <div className="flex items-baseline gap-2">
+                      <span className="font-medium">{p.name}</span>
+                      <span className="text-xs text-muted-foreground">{p.stage}</span>
+                    </div>
+                    {p.focus && <div className="text-xs text-muted-foreground">{p.focus}</div>}
+                    {p.next_milestone && (
+                      <div className="text-xs text-muted-foreground">Next: {p.next_milestone}</div>
                     )}
-                  </span>
-                  <span className="text-xs text-muted-foreground">
-                    {t.status === "open" ? t.owner : t.status}
-                    {t.due_on && ` · due ${t.due_on}`}
-                  </span>
+                    <ProgressLine progress={progress.get(p.slug)} />
+                  </div>
                 </li>
               ))}
             </ul>
-          ) : (
-            <p className="text-sm text-muted-foreground">Nothing open.</p>
-          )}
-        </Panel>
-
-        <Panel
-          title="Mail by category"
-          action={
-            <Link href="/mail" className="hover:text-foreground">
-              Open mail →
-            </Link>
-          }
-          className="lg:col-span-2"
-        >
-          {mail.error && <p className="mb-2 text-xs text-bad">Resend: {mail.error}</p>}
-          <ul className="space-y-2 text-sm">
-            {Object.entries(m.byCategory)
-              .sort((a, b) => b[1] - a[1])
-              .map(([cat, n]) => (
-                <li key={cat} className="flex items-center gap-3">
-                  <span className="w-24">{cat}</span>
-                  <span className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
-                    <span
-                      className="block h-full rounded-full bg-primary"
-                      style={{ width: `${(n / Math.max(1, m.received)) * 100}%` }}
-                    />
-                  </span>
-                  <span className="w-8 text-right tabular-nums text-muted-foreground">{n}</span>
-                </li>
-              ))}
-          </ul>
-          <p className="mt-3 text-xs text-muted-foreground">
-            Last {m.received} received and {m.sent} sent through Resend.
-          </p>
-        </Panel>
-      </div>
-
-      <Panel
-        title="Analytics"
-        action={series.length ? "Recorded by the Co-Founder from each source" : undefined}
-      >
-        {series.length ? (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="text-left text-xs text-muted-foreground">
-                <tr>
-                  <th className="py-2 pr-4 font-normal">Metric</th>
-                  <th className="py-2 pr-4 font-normal">Project</th>
-                  <th className="py-2 pr-4 text-right font-normal">Latest</th>
-                  <th className="py-2 pr-4 text-right font-normal">Change</th>
-                  <th className="py-2 pr-4 font-normal">Trend</th>
-                  <th className="py-2 font-normal">Source · as of</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {series.map((s) => {
-                  const delta = s.previous === null ? null : s.latest - s.previous;
-                  return (
-                    <tr key={`${s.metric}-${s.project}`}>
-                      <td className="py-2 pr-4">{s.metric.replace(/_/g, " ")}</td>
-                      <td className="py-2 pr-4 text-muted-foreground">
-                        {s.project ? (projectName.get(s.project) ?? s.project) : "Portfolio"}
-                      </td>
-                      <td className="py-2 pr-4 text-right tabular-nums">
-                        {formatValue(s.latest, s.unit)}
-                      </td>
-                      <td className="py-2 pr-4 text-right tabular-nums text-muted-foreground">
-                        {delta === null
-                          ? "—"
-                          : `${delta > 0 ? "+" : ""}${formatValue(delta, s.unit)}`}
-                      </td>
-                      <td className="py-2 pr-4">
-                        <Sparkline points={s.points} />
-                      </td>
-                      <td className="py-2 text-xs text-muted-foreground">
-                        {s.source} · {formatDistanceToNow(new Date(s.asOf), { addSuffix: true })}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <p className="text-sm text-muted-foreground">No metrics recorded yet.</p>
-        )}
-      </Panel>
-
-      <div className="grid gap-6 lg:grid-cols-2">
-        <Panel title="Projects">
-          <ul className="divide-y">
-            {data.projects.map((p) => (
-              <li key={p.slug} className="flex gap-3 py-2.5 text-sm">
-                <Dot status={p.health} />
-                <div className="flex-1">
-                  <div className="flex items-baseline gap-2">
-                    <span className="font-medium">{p.name}</span>
-                    <span className="text-xs text-muted-foreground">{p.stage}</span>
-                  </div>
-                  {p.focus && <div className="text-xs text-muted-foreground">{p.focus}</div>}
-                  {p.next_milestone && (
-                    <div className="text-xs text-muted-foreground">Next: {p.next_milestone}</div>
-                  )}
-                </div>
-              </li>
-            ))}
-          </ul>
-        </Panel>
-        <Panel title="Agents">
-          <ul className="divide-y">
-            {data.agents.map((a) => (
-              <li key={a.id} className="flex gap-3 py-2.5 text-sm">
-                <Dot status={a.status} />
-                <div className="flex-1">
-                  <div className="flex items-baseline gap-2">
-                    <span className="font-medium">{a.name}</span>
-                    <span className="text-xs text-muted-foreground">
-                      {a.status.replace("_", " ")}
-                    </span>
-                    {a.last_activity_at && (
-                      <span className="ml-auto text-xs text-muted-foreground">
-                        {formatDistanceToNow(new Date(a.last_activity_at), { addSuffix: true })}
+          </Panel>
+          <Panel title="Agents">
+            <ul className="divide-y">
+              {data.agents.map((a) => (
+                <li key={a.id} className="flex gap-3 py-2.5 text-sm">
+                  <Dot status={a.status} />
+                  <div className="flex-1">
+                    <div className="flex items-baseline gap-2">
+                      <span className="font-medium">{a.name}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {a.status.replace("_", " ")}
                       </span>
-                    )}
-                  </div>
-                  {a.mission && <div className="text-xs text-muted-foreground">{a.mission}</div>}
-                  {a.last_activity && (
-                    <div className="text-xs">
-                      {a.evidence_url && /^https:\/\//.test(a.evidence_url) ? (
-                        <a
-                          href={a.evidence_url}
-                          className="underline"
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          {a.last_activity}
-                        </a>
-                      ) : (
-                        a.last_activity
+                      {a.last_activity_at && (
+                        <span className="ml-auto text-xs text-muted-foreground">
+                          {formatDistanceToNow(new Date(a.last_activity_at), { addSuffix: true })}
+                        </span>
                       )}
                     </div>
-                  )}
-                </div>
-              </li>
-            ))}
-          </ul>
-        </Panel>
+                    {a.mission && <div className="text-xs text-muted-foreground">{a.mission}</div>}
+                    {a.last_activity && (
+                      <div className="text-xs">
+                        {a.evidence_url && /^https:\/\//.test(a.evidence_url) ? (
+                          <a
+                            href={a.evidence_url}
+                            className="underline"
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            {a.last_activity}
+                          </a>
+                        ) : (
+                          a.last_activity
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </Panel>
+        </div>
       </div>
+    </div>
+  );
+}
+
+const CHIP = {
+  open: "bg-muted text-muted-foreground",
+  doing: "bg-primary/15 text-primary",
+  blocked: "bg-bad/15 text-bad",
+  done: "bg-good/15 text-good",
+  dropped: "bg-muted text-muted-foreground line-through",
+} as const;
+
+function StatusChip({ status }: { status: keyof typeof CHIP }) {
+  return (
+    <span className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${CHIP[status]}`}>
+      {status}
+    </span>
+  );
+}
+
+function ProgressLine({
+  progress,
+}: {
+  progress: ReturnType<typeof projectProgress> extends Map<string, infer P> ? P | undefined : never;
+}) {
+  if (!progress || progress.completion === null) return null;
+  return (
+    <div className="mt-1.5 flex items-center gap-2 text-[11px] text-muted-foreground">
+      <span className="h-1.5 w-24 overflow-hidden rounded-full bg-muted">
+        <span
+          className="block h-full rounded-full bg-good transition-[width] duration-500"
+          style={{ width: `${Math.round(progress.completion * 100)}%` }}
+        />
+      </span>
+      <span>
+        {progress.done}/{progress.total} done
+        {progress.doing > 0 && ` · ${progress.doing} doing`}
+        {progress.blocked > 0 && ` · ${progress.blocked} blocked`}
+      </span>
     </div>
   );
 }
