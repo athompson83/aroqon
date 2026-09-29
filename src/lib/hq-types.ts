@@ -13,6 +13,7 @@ export const Task = z.object({
   title: z.string(),
   detail: z.string().nullable(),
   project_slug: z.string().nullable(),
+  signal_id: z.string().nullable().optional().catch(null),
   owner: TaskOwner,
   priority: Priority,
   status: TaskStatus,
@@ -66,6 +67,8 @@ export type Metric = z.infer<typeof Metric>;
 export const Brief = z.object({
   id: z.uuid(),
   kind: z.enum(["daily", "weekly", "adhoc"]),
+  source: z.string().catch("cofounder"),
+  project_slug: z.string().nullable().catch(null),
   headline: z.string(),
   body_md: z.string(),
   created_at: z.string(),
@@ -97,6 +100,38 @@ function lenientArray<T extends z.ZodType>(item: T) {
     );
 }
 
+export const Severity = z.enum(["critical", "warning", "info"]);
+export type Severity = z.infer<typeof Severity>;
+
+export const Signal = z.object({
+  id: z.uuid(),
+  source: z.string(),
+  fingerprint: z.string(),
+  project_slug: z.string().nullable(),
+  severity: Severity,
+  title: z.string(),
+  detail: z.string().nullable(),
+  url: z.string().nullable(),
+  status: z.enum(["open", "resolved", "muted"]),
+  first_seen: z.string(),
+  last_seen: z.string(),
+  resolved_at: z.string().nullable(),
+  resolution: z.string().nullable(),
+});
+export type Signal = z.infer<typeof Signal>;
+
+export const Housekeeping = z
+  .object({
+    ran_at: z.string(),
+    signals_resolved: z.number(),
+    tasks_closed: z.number(),
+    tasks_dropped: z.number(),
+    agents_idled: z.number(),
+    reports_archived: z.number(),
+  })
+  .nullable()
+  .catch(null);
+
 export const Dashboard = z.object({
   projects: lenientArray(Project),
   tasks: lenientArray(Task),
@@ -104,6 +139,8 @@ export const Dashboard = z.object({
   metrics: lenientArray(Metric),
   briefs: lenientArray(Brief),
   triage: lenientArray(Triage),
+  signals: lenientArray(Signal),
+  housekeeping: Housekeeping.optional().transform((h) => h ?? null),
 });
 export type Dashboard = z.infer<typeof Dashboard>;
 

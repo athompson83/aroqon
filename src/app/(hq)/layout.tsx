@@ -1,13 +1,8 @@
 import Link from "next/link";
 
 import { LiveRefresh } from "@/components/hq/live-refresh";
+import { NavLinks } from "@/components/hq/nav-links";
 import { signOutAction } from "@/lib/actions";
-
-const NAV = [
-  { href: "/", label: "Overview" },
-  { href: "/todo", label: "To-do" },
-  { href: "/mail", label: "Mail" },
-];
 
 export default function HqLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -19,17 +14,7 @@ export default function HqLayout({ children }: { children: React.ReactNode }) {
           </span>
           Aroqon HQ
         </Link>
-        <nav className="flex gap-1 text-sm">
-          {NAV.map((n) => (
-            <Link
-              key={n.href}
-              href={n.href}
-              className="rounded-md px-3 py-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
-            >
-              {n.label}
-            </Link>
-          ))}
-        </nav>
+        <NavLinks />
         <div className="ml-auto flex items-center gap-4">
           <LiveRefresh />
           <form action={signOutAction}>

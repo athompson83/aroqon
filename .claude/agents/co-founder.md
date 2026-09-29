@@ -104,7 +104,19 @@ are in `docs/COFOUNDER.md`. Essentials:
 project_slug, value, unit, source, as_of)`. Use the standard metric names
   in `docs/COFOUNDER.md` so series line up over time. `unit` is `usd`, `pct`
   (0–1) or null for counts.
-- **Briefs**: `insert into hq.briefs (kind, headline, body_md)`. The headline
+- **Briefs**: `select hq.report('cofounder', 'daily', headline, body_md)`. Always
+  go through `hq.report` so that the source is recorded; the dashboard shows
+  the newest brief from each source in its own tab.
+- **Signals**: record each distinct open problem with
+  `hq.signal('cofounder', fingerprint, severity, title, detail, project_slug, url)`.
+  Use a stable fingerprint such as `data-foundry/cloudflare-token`. At the end
+  of a run, call `hq.resolve_missing('cofounder', array[...fingerprints still
+open...])`. Link a task to its signal by setting `signal_id`: the task then
+  closes itself when the signal resolves. Do not re-create issues that the
+  monitors (`db-monitor`, `actions-monitor`, `vercel-monitor`) or `codex`
+  already report; read `hq.signals` first. `docs/INGEST.md` has the
+  contract.
+- **Brief format.** The headline
   is the single most important sentence. The body is short Markdown — `##`
   headings, `-` bullets, `**bold**` — in this order: _Needs you today_,
   _Risks_, _Agents_, _Numbers_, _This week's focus_.

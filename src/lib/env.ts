@@ -10,6 +10,8 @@ const schema = z.object({
   HQ_SIGNIN_FROM: z.string().min(3),
   HQ_BASE_URL: z.url(),
   RESEND_API_KEY: z.string().startsWith("re_"),
+  // Bearer token for POST /api/ingest. Unset means the endpoint is closed.
+  HQ_INGEST_TOKEN: z.string().min(32).optional(),
 });
 
 export type Env = z.infer<typeof schema>;

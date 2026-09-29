@@ -50,6 +50,10 @@ Next.js app in this repository.
 Project slugs: `data-foundry`, `captivate`, `certivo`, `proficiencyai`,
 `itemgen`, `catengine`, `mastery-mindset`, `kynomy`, `rise`.
 
+Monitors and Codex write through `hq.report`, `hq.signal` and
+`hq.resolve_missing`, or over HTTP. `docs/INGEST.md` has the contract and the
+automatic clean-up rules.
+
 ## Standard metric names
 
 Use these names so that each series lines up over time. Add new names here

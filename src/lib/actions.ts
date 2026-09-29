@@ -5,7 +5,7 @@ import { cookies } from "next/headers";
 import { z } from "zod";
 import { isOwner } from "./auth";
 import { env } from "./env";
-import { saveTask, saveTriage } from "./hq";
+import { saveTask, saveTriage, setSignalStatus } from "./hq";
 import { TaskInput, type Task } from "./hq-types";
 import { projectFor } from "./mail-organize";
 import { fetchBody, sendReply, sendSignInLink, type MailBody } from "./resend";
@@ -28,6 +28,37 @@ export async function saveTaskAction(input: unknown): Promise<Result<Task>> {
     const task = await saveTask(parsed.data);
     revalidatePath("/", "layout");
     return { ok: true, data: task };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+const SignalInput = z.object({
+  id: z.uuid(),
+  status: z.enum(["open", "resolved", "muted"]),
+});
+
+export async function signalAction(input: unknown): Promise<Result<null>> {
+  if (!(await isOwner())) return NOT_SIGNED_IN;
+  const parsed = SignalInput.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "That change is not valid" };
+  try {
+    await setSignalStatus(parsed.data.id, parsed.data.status);
+    revalidatePath("/", "layout");
+    return { ok: true, data: null };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+export async function dropTasksAction(input: unknown): Promise<Result<number>> {
+  if (!(await isOwner())) return NOT_SIGNED_IN;
+  const parsed = z.object({ ids: z.array(z.uuid()).min(1).max(100) }).safeParse(input);
+  if (!parsed.success) return { ok: false, error: "Nothing to drop" };
+  try {
+    for (const id of parsed.data.ids) await saveTask({ id, status: "dropped" });
+    revalidatePath("/", "layout");
+    return { ok: true, data: parsed.data.ids.length };
   } catch (e) {
     return fail(e);
   }

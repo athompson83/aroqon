@@ -4,27 +4,51 @@ import { useOptimistic, useState, useTransition } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { saveTaskAction } from "@/lib/actions";
+import { dropTasksAction, saveTaskAction } from "@/lib/actions";
 import type { Task } from "@/lib/hq-types";
 import { cn } from "@/lib/utils";
 
 const selectClass = "h-9 rounded-md border bg-background px-2 text-sm";
 
-const GROUPS: { title: string; match: (t: Task) => boolean }[] = [
-  { title: "Doing", match: (t) => t.status === "doing" },
-  { title: "Blocked", match: (t) => t.status === "blocked" },
-  { title: "Yours", match: (t) => t.status === "open" && t.owner === "owner" },
-  { title: "Co-Founder & agents", match: (t) => t.status === "open" && t.owner !== "owner" },
-  { title: "Done this week", match: (t) => t.status === "done" || t.status === "dropped" },
-];
+function groups(stale: Set<string>): { key: string; title: string; match: (t: Task) => boolean }[] {
+  return [
+    { key: "doing", title: "Doing", match: (t) => t.status === "doing" },
+    { key: "blocked", title: "Blocked", match: (t) => t.status === "blocked" && !stale.has(t.id) },
+    {
+      key: "yours",
+      title: "Yours",
+      match: (t) => t.status === "open" && t.owner === "owner" && !stale.has(t.id),
+    },
+    {
+      key: "agents",
+      title: "Co-Founder & agents",
+      match: (t) => t.status === "open" && t.owner !== "owner",
+    },
+    // Untouched for 14 days. Agent work is dropped automatically after 21;
+    // yours waits here for you to keep it (change anything) or drop it.
+    {
+      key: "stale",
+      title: "Stale",
+      match: (t) => (t.status === "open" || t.status === "blocked") && stale.has(t.id),
+    },
+    {
+      key: "done",
+      title: "Done this week",
+      match: (t) => t.status === "done" || t.status === "dropped",
+    },
+  ];
+}
 
 export function TodoBoard({
   tasks,
   projects,
+  staleIds,
 }: {
   tasks: Task[];
   projects: { slug: string; name: string }[];
+  staleIds: string[];
 }) {
+  const stale = new Set(staleIds);
   const [pending, startTransition] = useTransition();
   // Status, priority and owner changes show at once; the server's answer
   // replaces them when it arrives, or the change rolls back if it fails.
@@ -108,13 +132,31 @@ export function TodoBoard({
       </form>
       {error && <p className="text-sm text-bad">{error}</p>}
 
-      <div className="space-y-6 xl:grid xl:grid-cols-3 xl:items-start xl:gap-6 xl:space-y-0 min-[1800px]:grid-cols-5">
-        {GROUPS.map((g) => {
+      <div className="space-y-6 xl:grid xl:grid-cols-3 xl:items-start xl:gap-6 xl:space-y-0 min-[1800px]:grid-cols-6">
+        {groups(stale).map((g) => {
           const rows = shown.filter(g.match);
+          if (g.key === "stale" && !rows.length) return null;
           return (
-            <section key={g.title} className={cn(!rows.length && "max-xl:hidden")}>
-              <h2 className="mb-2 text-sm font-semibold">
-                {g.title} <span className="font-normal text-muted-foreground">{rows.length}</span>
+            <section key={g.key} className={cn(!rows.length && "max-xl:hidden")}>
+              <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold">
+                <span className={cn(g.key === "stale" && "text-warn")}>{g.title}</span>
+                <span className="font-normal text-muted-foreground">{rows.length}</span>
+                {g.key === "stale" && (
+                  <button
+                    type="button"
+                    className="ml-auto text-xs font-normal text-muted-foreground hover:text-bad"
+                    disabled={pending}
+                    onClick={() =>
+                      startTransition(async () => {
+                        for (const t of rows) applyPatch({ id: t.id, status: "dropped" });
+                        const r = await dropTasksAction({ ids: rows.map((t) => t.id) });
+                        setError(r.ok ? null : r.error);
+                      })
+                    }
+                  >
+                    Drop all
+                  </button>
+                )}
               </h2>
               {!rows.length && (
                 <p className="rounded-xl border border-dashed p-4 text-sm text-muted-foreground">

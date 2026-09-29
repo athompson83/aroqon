@@ -1,6 +1,6 @@
 import "server-only";
 import { env } from "./env";
-import { Dashboard, Task, Triage, type TaskInput } from "./hq-types";
+import { Dashboard, Signal, Task, Triage, type TaskInput } from "./hq-types";
 
 async function rpc(fn: string, args: Record<string, unknown>): Promise<unknown> {
   const e = env();
@@ -40,4 +40,12 @@ export async function saveTriage(triage: {
 
 export async function consumeNonce(nonce: string): Promise<boolean> {
   return (await rpc("hq_consume_nonce", { p_nonce: nonce })) === true;
+}
+
+export async function setSignalStatus(id: string, status: "open" | "resolved" | "muted") {
+  return Signal.parse(await rpc("hq_signal_set", { p_id: id, p_status: status }));
+}
+
+export async function ingest(payload: unknown): Promise<unknown> {
+  return rpc("hq_ingest", { p_payload: payload });
 }
