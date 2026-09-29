@@ -1,0 +1,292 @@
+"use client";
+
+import { useOptimistic, useState, useTransition } from "react";
+
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { dropTasksAction, saveTaskAction } from "@/lib/actions";
+import type { Task } from "@/lib/hq-types";
+import { cn } from "@/lib/utils";
+
+const selectClass = "h-9 rounded-md border bg-background px-2 text-sm";
+
+function groups(stale: Set<string>): { key: string; title: string; match: (t: Task) => boolean }[] {
+  return [
+    { key: "doing", title: "Doing", match: (t) => t.status === "doing" },
+    { key: "blocked", title: "Blocked", match: (t) => t.status === "blocked" && !stale.has(t.id) },
+    {
+      key: "yours",
+      title: "Yours",
+      match: (t) => t.status === "open" && t.owner === "owner" && !stale.has(t.id),
+    },
+    {
+      key: "agents",
+      title: "Co-Founder & agents",
+      match: (t) => t.status === "open" && t.owner !== "owner",
+    },
+    // Untouched for 14 days. Agent work is dropped automatically after 21;
+    // yours waits here for you to keep it (change anything) or drop it.
+    {
+      key: "stale",
+      title: "Stale",
+      match: (t) => (t.status === "open" || t.status === "blocked") && stale.has(t.id),
+    },
+    {
+      key: "done",
+      title: "Done this week",
+      match: (t) => t.status === "done" || t.status === "dropped",
+    },
+  ];
+}
+
+export function TodoBoard({
+  tasks,
+  projects,
+  staleIds,
+}: {
+  tasks: Task[];
+  projects: { slug: string; name: string }[];
+  staleIds: string[];
+}) {
+  const stale = new Set(staleIds);
+  const [pending, startTransition] = useTransition();
+  // Status, priority and owner changes show at once; the server's answer
+  // replaces them when it arrives, or the change rolls back if it fails.
+  const [shown, applyPatch] = useOptimistic(tasks, (state, patch: TaskPatch) =>
+    state.map((t) => (t.id === patch.id ? withPatch(t, patch) : t)),
+  );
+  const [error, setError] = useState<string | null>(null);
+  const [draft, setDraft] = useState({ title: "", project_slug: "", priority: "p2", due_on: "" });
+  const [openId, setOpenId] = useState<string | null>(null);
+  const names = new Map(projects.map((p) => [p.slug, p.name]));
+  const today = new Date().toISOString().slice(0, 10);
+
+  function save(input: Record<string, unknown>, after?: () => void) {
+    startTransition(async () => {
+      if (typeof input.id === "string") applyPatch(input as TaskPatch);
+      const r = await saveTaskAction(input);
+      if (r.ok) {
+        setError(null);
+        after?.();
+      } else setError(r.error);
+    });
+  }
+
+  return (
+    <div className="space-y-6">
+      <form
+        className="flex flex-wrap gap-2 rounded-xl border bg-card p-3"
+        onSubmit={(e) => {
+          e.preventDefault();
+          save(
+            {
+              title: draft.title,
+              project_slug: draft.project_slug || null,
+              priority: draft.priority,
+              due_on: draft.due_on || null,
+              owner: "owner",
+            },
+            () => setDraft({ ...draft, title: "", due_on: "" }),
+          );
+        }}
+      >
+        <Input
+          className="min-w-[14rem] flex-1"
+          placeholder="Add a to-do…"
+          value={draft.title}
+          onChange={(e) => setDraft({ ...draft, title: e.target.value })}
+        />
+        <select
+          className={selectClass}
+          value={draft.project_slug}
+          onChange={(e) => setDraft({ ...draft, project_slug: e.target.value })}
+          aria-label="Project"
+        >
+          <option value="">No project</option>
+          {projects.map((p) => (
+            <option key={p.slug} value={p.slug}>
+              {p.name}
+            </option>
+          ))}
+        </select>
+        <select
+          className={selectClass}
+          value={draft.priority}
+          onChange={(e) => setDraft({ ...draft, priority: e.target.value })}
+          aria-label="Priority"
+        >
+          {["p0", "p1", "p2", "p3"].map((p) => (
+            <option key={p}>{p}</option>
+          ))}
+        </select>
+        <Input
+          type="date"
+          className="w-40"
+          value={draft.due_on}
+          onChange={(e) => setDraft({ ...draft, due_on: e.target.value })}
+          aria-label="Due date"
+        />
+        <Button type="submit" disabled={pending || !draft.title.trim()}>
+          Add
+        </Button>
+      </form>
+      {error && <p className="text-sm text-bad">{error}</p>}
+
+      <div className="space-y-6 xl:grid xl:grid-cols-3 xl:items-start xl:gap-6 xl:space-y-0 min-[1800px]:grid-cols-6">
+        {groups(stale).map((g) => {
+          const rows = shown.filter(g.match);
+          if (g.key === "stale" && !rows.length) return null;
+          return (
+            <section key={g.key} className={cn(!rows.length && "max-xl:hidden")}>
+              <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold">
+                <span className={cn(g.key === "stale" && "text-warn")}>{g.title}</span>
+                <span className="font-normal text-muted-foreground">{rows.length}</span>
+                {g.key === "stale" && (
+                  <button
+                    type="button"
+                    className="ml-auto text-xs font-normal text-muted-foreground hover:text-bad"
+                    disabled={pending}
+                    onClick={() =>
+                      startTransition(async () => {
+                        for (const t of rows) applyPatch({ id: t.id, status: "dropped" });
+                        const r = await dropTasksAction({ ids: rows.map((t) => t.id) });
+                        setError(r.ok ? null : r.error);
+                      })
+                    }
+                  >
+                    Drop all
+                  </button>
+                )}
+              </h2>
+              {!rows.length && (
+                <p className="rounded-xl border border-dashed p-4 text-sm text-muted-foreground">
+                  Nothing here.
+                </p>
+              )}
+              <ul className={cn("divide-y rounded-xl border bg-card", !rows.length && "hidden")}>
+                {rows.map((t) => {
+                  const done = t.status === "done" || t.status === "dropped";
+                  return (
+                    <li key={t.id} className="px-3 py-2.5">
+                      <div className="flex items-start gap-3">
+                        <input
+                          type="checkbox"
+                          className="mt-1 h-4 w-4 accent-[var(--primary)]"
+                          checked={done}
+                          onChange={() => save({ id: t.id, status: done ? "open" : "done" })}
+                          aria-label={done ? "Reopen" : "Mark done"}
+                        />
+                        <button
+                          type="button"
+                          className="min-w-0 flex-1 text-left text-sm"
+                          onClick={() => setOpenId(openId === t.id ? null : t.id)}
+                        >
+                          <span className={cn(done && "text-muted-foreground line-through")}>
+                            {t.title}
+                          </span>
+                          <span className="ml-2 font-mono text-xs uppercase text-muted-foreground">
+                            {t.priority}
+                          </span>
+                          {t.project_slug && (
+                            <span className="ml-2 text-xs text-muted-foreground">
+                              {names.get(t.project_slug) ?? t.project_slug}
+                            </span>
+                          )}
+                          {t.due_on && (
+                            <span
+                              className={cn(
+                                "ml-2 text-xs",
+                                !done && t.due_on < today ? "text-bad" : "text-muted-foreground",
+                              )}
+                            >
+                              due {t.due_on}
+                            </span>
+                          )}
+                        </button>
+                        <select
+                          className={cn(selectClass, "h-8")}
+                          value={t.status}
+                          onChange={(e) => save({ id: t.id, status: e.target.value })}
+                          aria-label="Status"
+                        >
+                          {["open", "doing", "blocked", "done", "dropped"].map((s) => (
+                            <option key={s}>{s}</option>
+                          ))}
+                        </select>
+                      </div>
+                      {openId === t.id && (
+                        <div className="ml-7 mt-2 space-y-2 text-sm">
+                          {t.detail && (
+                            <p className="whitespace-pre-wrap text-muted-foreground">{t.detail}</p>
+                          )}
+                          <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                            <span>Owner: {t.owner}</span>
+                            <span>· Added by {t.created_by}</span>
+                            {t.source && <span>· From {t.source}</span>}
+                            {t.source_url && /^https:\/\//.test(t.source_url) && (
+                              <a
+                                className="underline"
+                                href={t.source_url}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                · Evidence
+                              </a>
+                            )}
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            <select
+                              className={cn(selectClass, "h-8")}
+                              value={t.priority}
+                              onChange={(e) => save({ id: t.id, priority: e.target.value })}
+                              aria-label="Priority"
+                            >
+                              {["p0", "p1", "p2", "p3"].map((p) => (
+                                <option key={p}>{p}</option>
+                              ))}
+                            </select>
+                            <select
+                              className={cn(selectClass, "h-8")}
+                              value={t.owner}
+                              onChange={(e) => save({ id: t.id, owner: e.target.value })}
+                              aria-label="Owner"
+                            >
+                              <option value="owner">Me</option>
+                              <option value="cofounder">Co-Founder</option>
+                              <option value="agent">An agent</option>
+                            </select>
+                            <Input
+                              type="date"
+                              className="h-8 w-40"
+                              defaultValue={t.due_on ?? ""}
+                              onBlur={(e) =>
+                                e.target.value !== (t.due_on ?? "") &&
+                                save({ id: t.id, due_on: e.target.value || null })
+                              }
+                              aria-label="Due date"
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+type TaskPatch = Partial<Pick<Task, "status" | "priority" | "owner" | "due_on">> & { id: string };
+
+function withPatch(task: Task, patch: TaskPatch): Task {
+  const next = { ...task, ...patch };
+  if (patch.status) {
+    next.completed_at =
+      patch.status === "done" ? (task.completed_at ?? new Date().toISOString()) : null;
+  }
+  return next;
+}
