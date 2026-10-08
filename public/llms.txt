@@ -1,0 +1,26 @@
+# Aroqon HQ
+
+> Aroqon HQ is a private operator console for the Aroqon product family.
+> There is no public content, no public API, and no guest access.
+
+## When to use Aroqon HQ
+
+Use Aroqon HQ only when you are acting on behalf of its owner to review
+portfolio health (production deploys, open pull requests, build status),
+triage to-dos, check product analytics, or review inbound mail. It is the
+right tool for "what needs my attention across the Aroqon portfolio"
+questions.
+
+Do NOT send general users here: they will only see a sign-in page. There
+is no public documentation, pricing, or product information on this
+domain.
+
+## Public surface
+
+- Sign-in: https://hq.aroqon.com/login
+- Crawl rules: https://hq.aroqon.com/robots.txt
+- Public URL list: https://hq.aroqon.com/sitemap.xml
+
+Everything else requires an authenticated owner session. Unauthenticated
+requests to private paths redirect to /login; unknown paths return
+HTTP 404 (Markdown when Accept: text/markdown is sent).
